@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="Gradle: com.intel.jndn.utils:jndn-utils:1.1.1@jar">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/.gradle/caches/modules-2/files-2.1/com.intel.jndn.utils/jndn-utils/1.1.1/a6c1d24a30645e67c40ad9a8283af7309795c812/jndn-utils-1.1.1.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES>
+      <root url="jar://$USER_HOME$/.gradle/caches/modules-2/files-2.1/com.intel.jndn.utils/jndn-utils/1.1.1/6a9cdc61687186960bd2ef93840d928fe8a3ec42/jndn-utils-1.1.1-sources.jar!/" />
+    </SOURCES>
+  </library>
+</component>

@@ -76,21 +76,12 @@ public class MainActivity extends AppCompatActivity {
     private static String SCAN_INTERVAL_MAX = "SCAN_INTERVAL_MAX";
     private static String SCAN_MULTIPLIER = "SCAN_MULTIPLIER";
     private static String MAX_TOLERABLE_MISSED_SCANS = "MAX_TOLERABLE_MISSED_SCANS";
-
+    private static String BACKOFF_THRESHOLD = "BACKOFF_THRESHOLD";
 
     // the length of time that scans last for
     private int scanPeriod;
     // the time period between scans; this gets increased when we don't discover new devices and reset to 1000 when we do discover new devices
     private int scanInterval;
-    // this is what we multiply the scan interval by when we don't detect new devices on the previous scan; this is to reduce scanning
-    // frequency to save battery
-    // *** note that the backoff strategy to save battery is not actually used right now, since in order to
-    // get a device's location we only connect to it once and then disconnect and don't connect again
-    // *** the back off strategy only increases the scanning frequency if we were not connected to any device,
-    // in order to immediately get updates on devices in proximity
-    // *** the current way of disconnecting from a device after getting its location is a temporary solution, and may be replaced
-    // by mesh networking (allowing a peripheral to be connected to multiple central devices simultaneously)
-    private int intervalMultiplier;
     // this is the maximum value the scan interval can reach
     private int maxInterval;
     // this is the minimum value the scan interval can reach; it will be reset to this when a new device is discovered
@@ -113,6 +104,8 @@ public class MainActivity extends AppCompatActivity {
     private Button changeTolerableMissedButton;
     private Button changeMinIntervalButton;
     private Button changeMaxIntervalButton;
+    private Button changeBackoffThresholdButton;
+    private Button toggleAuthButton;
 
     // textViews to display selected device information
     private TextView selectedDeviceName;
@@ -122,12 +115,24 @@ public class MainActivity extends AppCompatActivity {
     private TextView maxTolerableMissedScansDisplay;
     private TextView minIntervalDisplay;
     private TextView maxIntervalDisplay;
+    private TextView backoffThresholdDisplay;
 
     // this is true if we are in a cycle of scanning (we are either actually scanning, or waiting in a scan interval to scan again)
     private boolean currentlyInScanCycle = false;
 
-    // variable to tell us if there were any new devices discovered on the last scan; if none were, then we increase the scan interval
-    private boolean newDevicesDiscoveredOnLastScan = false;
+    // this is true if we are doing beacon MAC address authentication, meaning we erase the beacon's location information after it goes
+    // out of range so that each time we come in range of the beacon, we connect to it to affirm that the MAC address it advertises is
+    // actually reachable and not another beacon spoofing the MAC address
+    // if this is false, then there is no MAC address authentication; this can improve performance and is recommended in most cases
+    private boolean beaconMACAuthentication = false;
+
+    // variable to tell us how many scans it has been since we were in the range of location beacons
+    int scansSinceLastInRangeOfLocationBeacons = 0;
+    // the maximum amount of scans that we wait since being in the range of location beacons before starting to slow down the scan rate
+    int backoffThreshold = 3;
+    // this is what we multiply the scan interval by when we don't detect new devices on the previous scan; this is to reduce scanning
+    // frequency to save battery
+    private int intervalMultiplier;
 
     // variable that indicates whether there are any devices with active connections; if there are, we do the backoff strategy for scanning,
     // if there are not, then we keep the scan for every 1 second to make sure that we discover new devices as quickly as possible
@@ -312,14 +317,18 @@ public class MainActivity extends AppCompatActivity {
                 String dataLocation = receivedData.getContent().toString();
 
                 String deviceAddressNoColons = dataName.substring(dataName.lastIndexOf("/") + 1);
+                String deviceAddressWithColons = BluetoothHelperFunctions.addColonsToMACAddress(deviceAddressNoColons);
 
                 addressToLocation.put(deviceAddressNoColons, dataLocation);
                 addressToLocationMappingsAdapter.add(
                         "Device location: " + "\n" + dataLocation + "\n" +
-                        "Device address: " + "\n" + BluetoothHelperFunctions.addColonsToMACAddress(deviceAddressNoColons));
+                        "Device address: " + "\n" + deviceAddressWithColons);
 
                 bleService.disconnect(BluetoothHelperFunctions.addColonsToMACAddress(deviceAddressNoColons));
 
+                sendDataForBeaconsInRangeUpdate();
+
+                // create Byte object array for storage
                 Byte[] dataByteObjectArray = new Byte[dataByteArray.length];
 
                 int i = 0;
@@ -327,7 +336,11 @@ public class MainActivity extends AppCompatActivity {
                     dataByteObjectArray[i++] = b;
                 }
 
-                sendDataForBeaconsInRangeUpdate();
+                // stores the data packet retrieved for this device to satisfy later interests
+                nfdService.lastDataPacketForDevices.put(deviceAddressWithColons, dataByteObjectArray);
+
+                // sends data packet to NFD face to satisfy possible interests for this device's location data
+                nfdService.sendDataPacketAsBytesToNFDFace(dataByteArray);
 
             }
             else if (intent.getAction().equals(BLEService.ADD_CONNECTED_DEVICE_LIST)) {
@@ -383,7 +396,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            String deviceAddress = "";
+            String deviceAddress = intent.getExtras().getString(NFDService.DEVICE_ADDRESS);
             // this is not used in the current implementation, but if BLEApp gets an interest for /icear/beacon/discover,
             // it will proactively reset the BLE scan and turn the scan interval back to its lowest value; this was so that
             // a user could manually reset the BLEApp from its backoff strategy, although since the backoff strategy is not
@@ -397,11 +410,85 @@ public class MainActivity extends AppCompatActivity {
             }
             else if (action.equals(NFDService.INTEREST_READ_FROM_DEVICE)) {
 
-                deviceAddress = intent.getExtras().getString(NFDService.INTEREST_MAC);
+                //deviceAddress = intent.getExtras().getString(NFDService.DEVICE_ADDRESS);
 
                 Log.d(TAG, "got interest to direct read from device with address: " + deviceAddress);
 
-                bleService.getDataPacketFromArduino(deviceAddress);
+                if (nfdService.lastDataPacketForDevices.containsKey(deviceAddress)) {
+                    nfdService.sendDataPacketAsBytesToNFDFace(
+                            convertObjectByteArrayToByteArray(nfdService.lastDataPacketForDevices.get(deviceAddress)));
+                }
+                else {
+                    bleService.getDataPacketFromArduino(deviceAddress);
+                }
+            }
+            else if (action.equals(NFDService.DEVICE_LOCATION_INTEREST_DATA)) {
+
+                //deviceAddress = intent.getExtras().getString(NFDService.DEVICE_ADDRESS);
+
+                byte[] dataByteArray = intent.getExtras().getByteArray(NFDService.DATA_PACKET_AS_BYTE_ARRAY);
+
+                Data receivedData = NFDService.interpretByteArrayAsData(dataByteArray);
+
+                if (receivedData == null) {
+                    Log.d(TAG, "data verification failed, ignoring data packet");
+                    return;
+                }
+
+                String dataName = receivedData.getName().toString();
+                String dataLocation = receivedData.getContent().toString();
+
+                String deviceAddressNoColons = dataName.substring(dataName.lastIndexOf("/") + 1);
+                String deviceAddressWithColons = BluetoothHelperFunctions.addColonsToMACAddress(deviceAddressNoColons);
+
+                addressToLocation.put(deviceAddressNoColons, dataLocation);
+                addressToLocationMappingsAdapter.add(
+                        "Device location: " + "\n" + dataLocation + "\n" +
+                                "Device address: " + "\n" + deviceAddressWithColons);
+
+                bleService.disconnect(BluetoothHelperFunctions.addColonsToMACAddress(deviceAddressNoColons));
+
+                sendDataForBeaconsInRangeUpdate();
+
+                // create Byte object array for storage
+                Byte[] dataByteObjectArray = new Byte[dataByteArray.length];
+
+                int i = 0;
+                for (byte b : dataByteArray) {
+                    dataByteObjectArray[i++] = b;
+                }
+
+                // stores the data packet retrieved for this device to satisfy later interests
+                nfdService.lastDataPacketForDevices.put(deviceAddressWithColons, dataByteObjectArray);
+
+                // sends data packet to NFD face to satisfy possible interests for this device's location data
+                nfdService.sendDataPacketAsBytesToNFDFace(dataByteArray);
+
+            }
+            else if (action.equals(NFDService.DEVICE_LOCATION_INTEREST_FAILEDVERIFY)) {
+
+                //deviceAddress = intent.getExtras().getString(NFDService.DEVICE_ADDRESS);
+
+                //bleService.connect(deviceAddress);
+
+            }
+            else if (action.equals(NFDService.DEVICE_LOCATION_INTEREST_TIMEOUT)) {
+
+                //deviceAddress = intent.getExtras().getString(NFDService.DEVICE_ADDRESS);
+
+                //bleService.connect(deviceAddress);
+            }
+            else if (action.equals(NFDService.DEVICE_LOCATION_INTEREST_NACK)) {
+
+                //deviceAddress = intent.getExtras().getString(NFDService.DEVICE_ADDRESS);
+
+                //bleService.connect(deviceAddress);
+            }
+            else if (action.equals(NFDService.DEVICE_LOCATION_INTEREST_EXCEPTION)) {
+
+                //deviceAddress = intent.getExtras().getString(NFDService.DEVICE_ADDRESS);
+
+                //bleService.connect(deviceAddress);
             }
 
             updateUI();
@@ -438,12 +525,13 @@ public class MainActivity extends AppCompatActivity {
         mScanPreferences = getSharedPreferences("ScanPreferences", Context.MODE_PRIVATE);
         mScanPreferencesEditor = mScanPreferences.edit();
 
-        scanInterval = mScanPreferences.getInt(SCAN_INTERVAL_START, 2600);
-        scanPeriod = mScanPreferences.getInt(SCAN_PERIOD, 2600);
-        minInterval = mScanPreferences.getInt(SCAN_INTERVAL_MIN, 2600);
-        maxInterval = mScanPreferences.getInt(SCAN_INTERVAL_MAX, 2600);
+        scanInterval = mScanPreferences.getInt(SCAN_INTERVAL_START, 3000);
+        scanPeriod = mScanPreferences.getInt(SCAN_PERIOD, 3000);
+        minInterval = mScanPreferences.getInt(SCAN_INTERVAL_MIN, 3000);
+        maxInterval = mScanPreferences.getInt(SCAN_INTERVAL_MAX, 24000);
         maxTolerableMissedScans = mScanPreferences.getInt(MAX_TOLERABLE_MISSED_SCANS, 2);
         intervalMultiplier = mScanPreferences.getInt(SCAN_MULTIPLIER, 2);
+        backoffThreshold = mScanPreferences.getInt(BACKOFF_THRESHOLD, 3);
 
         // getting default bluetooth Adapter for enabling bluetooth / doing LE scan
         bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
@@ -464,8 +552,9 @@ public class MainActivity extends AppCompatActivity {
         maxTolerableMissedScansDisplay = (TextView) findViewById(R.id.maxTolerableMissedDisplay);
         minIntervalDisplay = (TextView) findViewById(R.id.minScanIntervalDisplay);
         maxIntervalDisplay = (TextView) findViewById(R.id.maxScanIntervalDisplay);
-        selectedDeviceName = (TextView) findViewById(R.id.deviceName);
-        selectedDeviceAddress = (TextView) findViewById(R.id.deviceAddress);
+        backoffThresholdDisplay = (TextView) findViewById(R.id.backoffThresholdDisplay);
+        //selectedDeviceName = (TextView) findViewById(R.id.deviceName);
+        //selectedDeviceAddress = (TextView) findViewById(R.id.deviceAddress);
 
         // getting references to ListView UI elements
         discoveredDevicesListView = (ListView) findViewById(R.id.discoveredDevicesList);
@@ -486,8 +575,8 @@ public class MainActivity extends AppCompatActivity {
                 String deviceAddress = DeviceInfoHelperFunctions.getDeviceAddressFromDeviceInfo(selectedDevice);
                 String deviceName = DeviceInfoHelperFunctions.getDeviceNameFromDeviceInfo(selectedDevice);
 
-                selectedDeviceName.setText(deviceName);
-                selectedDeviceAddress.setText(deviceAddress);
+                //selectedDeviceName.setText(deviceName);
+                //selectedDeviceAddress.setText(deviceAddress);
 
                 updateUI();
             }
@@ -503,8 +592,8 @@ public class MainActivity extends AppCompatActivity {
                 String deviceAddress = DeviceInfoHelperFunctions.getDeviceAddressFromDeviceInfo(selectedDevice);
                 String deviceName = DeviceInfoHelperFunctions.getDeviceNameFromDeviceInfo(selectedDevice);
 
-                selectedDeviceName.setText(deviceName);
-                selectedDeviceAddress.setText(deviceAddress);
+                //selectedDeviceName.setText(deviceName);
+                //selectedDeviceAddress.setText(deviceAddress);
 
                 updateUI();
             }
@@ -520,8 +609,8 @@ public class MainActivity extends AppCompatActivity {
                 String deviceAddress = DeviceInfoHelperFunctions.getDeviceAddressFromDeviceInfo(selectedDevice);
                 String deviceName = DeviceInfoHelperFunctions.getDeviceNameFromDeviceInfo(selectedDevice);
 
-                selectedDeviceName.setText(deviceName);
-                selectedDeviceAddress.setText(deviceAddress);
+                //selectedDeviceName.setText(deviceName);
+                //selectedDeviceAddress.setText(deviceAddress);
 
                 updateUI();
             }
@@ -634,12 +723,12 @@ public class MainActivity extends AppCompatActivity {
 
                         // changes the starting, minimum, and maximum scan intervals since there is no backoff strategy for now
                         scanInterval = newScanInterval;
-                        minInterval = newScanInterval;
-                        maxInterval = newScanInterval;
+                        //minInterval = newScanInterval;
+                        //maxInterval = newScanInterval;
 
                         mScanPreferencesEditor.putInt(SCAN_INTERVAL_START, newScanInterval).commit();
-                        mScanPreferencesEditor.putInt(SCAN_INTERVAL_MIN, newScanInterval).commit();
-                        mScanPreferencesEditor.putInt(SCAN_INTERVAL_MAX, newScanInterval).commit();
+                        //mScanPreferencesEditor.putInt(SCAN_INTERVAL_MIN, newScanInterval).commit();
+                        //mScanPreferencesEditor.putInt(SCAN_INTERVAL_MAX, newScanInterval).commit();
 
                         stopBLEScanCycle();
 
@@ -911,6 +1000,88 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // this allows the user to change the tolerable number of missed scans for a device to still be considered in range by
+        // the application; this is here because it was found that devices were consistently missed on consecutive scans, which
+        // is likely because of the different frequencies at which devices send out advertisement packets
+        changeBackoffThresholdButton = (Button) findViewById(R.id.changeBackoffThresholdButton);
+        changeBackoffThresholdButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+
+                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                builder.setTitle("Enter New Value for Backoff Threshold (number of consecutive scans where no location beacons are in range " +
+                        "at which scanInterval will begin to increase)");
+
+                LinearLayout layout = new LinearLayout(MainActivity.this);
+                layout.setOrientation(LinearLayout.VERTICAL);
+
+                // Add a TextView here for the descriptor's index
+                final EditText numBox = new EditText(MainActivity.this);
+
+                numBox.setInputType(InputType.TYPE_CLASS_NUMBER);
+                builder.setView(numBox);
+
+                numBox.setHint("New Backoff Threshold");
+                layout.addView(numBox); // Notice this is an add method
+
+                // Set up the buttons
+                builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        int newBackoffThreshold;
+
+                        try {
+                            newBackoffThreshold = Integer.parseInt(numBox.getText().toString());
+                        }
+                        catch (NumberFormatException e) {
+                            Log.w(TAG, "Number format exception: " + e.getMessage());
+
+                            CharSequence text = "Number format exception: " + e.getMessage();
+                            int duration = Toast.LENGTH_SHORT;
+
+                            Toast toast = Toast.makeText(MainActivity.this, text, duration);
+                            toast.show();
+                            return;
+                        }
+
+                        backoffThreshold = newBackoffThreshold;
+
+                        mScanPreferencesEditor.putInt(BACKOFF_THRESHOLD, newBackoffThreshold).commit();
+
+                        updateUI();
+                    }
+                });
+                builder.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        dialog.cancel();
+                    }
+                });
+
+                builder.setView(layout);
+                builder.show();
+
+            }
+        });
+
+        // allows the user to toggle whether or not more serious beacon spoofing security is in place; if auth (authentication) is
+        // on, then BLEApp3 will erase the data information of beacons once they go out of range and reconnect to the beacons when
+        // they come back in range to confirm that the MAC address advertised by the beacon is indeed its own reachable MAC address,
+        // and not another beacon pretending to be this beacon
+        //
+        // if auth is turned off, then the application will save the beacon's location information upon first connecting and not erase
+        // it even after the beacon goes out of range; this is less straining on the beacons, and may also improve performance on the application
+        // side as well; it is recommended to have extra MAC address authentication off for this reason
+        toggleAuthButton = (Button) findViewById(R.id.toggleAuthButton);
+        toggleAuthButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                beaconMACAuthentication = !beaconMACAuthentication;
+
+                updateUI();
+            }
+        });
+
         // checks for the different permission required for the different parts of the app to work on start up; if
         // any of these permissions aren't enabled, the app will request user for permission and won't start scanning until they are enabled
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -1024,8 +1195,8 @@ public class MainActivity extends AppCompatActivity {
 
                     updateMissedScanCounts(devicesInRangeLastNScansHashMap, lastDiscoveredDevicesHashSet);
 
-                    if (!newDevicesDiscoveredOnLastScan) {
-                        Log.d(TAG, "no new devices were discovered on the last scan");
+                    if (scansSinceLastInRangeOfLocationBeacons > backoffThreshold) {
+                        Log.d(TAG, "We didn't detect location beacons for a long time, slowing down scan interval");
                         if (scanInterval < maxInterval) {
                             if (devicesWithActiveConnections) {
                                 scanInterval *= intervalMultiplier;
@@ -1035,7 +1206,6 @@ public class MainActivity extends AppCompatActivity {
                     else {
                         scanInterval = minInterval;
                     }
-                    newDevicesDiscoveredOnLastScan = false;
 
                     if (currentlyInScanCycle)
                         sendBroadcast(new Intent(START_SCAN_INTERVAL_WAIT));
@@ -1052,6 +1222,16 @@ public class MainActivity extends AppCompatActivity {
 
                     Log.d(TAG, "Currently connected devices: \n" +
                     bleService.getAllConnectedDevices());
+
+                    if (advertisingDevicesWithinRange.size() == 0) {
+                        // if there were no devices with in range for this scan, increment the counter
+                        scansSinceLastInRangeOfLocationBeacons++;
+                    }
+                    else {
+                        // if there were devices within range for this scan, reset the counter to 0
+                        scansSinceLastInRangeOfLocationBeacons = 0;
+                    }
+
                 } else {
                     Log.d(TAG, "nfdService was null");
                 }
@@ -1096,8 +1276,10 @@ public class MainActivity extends AppCompatActivity {
                                     }
 
                                     advertisingDevicesWithinRangeArrayAdapter.add(deviceInfo);
-
-                                    newDevicesDiscoveredOnLastScan = true;
+                                    // since we just came into range of a location beacon, we reset the scan counter for
+                                    // being in range of location beacons and set the scan interval to the minimum
+                                    scansSinceLastInRangeOfLocationBeacons = 0;
+                                    scanInterval = minInterval;
                                 }
 
                                 class OneShotTask implements Runnable {
@@ -1122,19 +1304,25 @@ public class MainActivity extends AppCompatActivity {
                                             */
 
 
-                                            /*
+
                                             // allows for devices to be removed from ble service's list of connected devices, rather
                                             // than waiting for the asynchronous device disconnected callback
+                                            /*
                                             if (bleService.activeDevices.containsKey(deviceAddress)) {
 
                                                 bleService.activeDevices.get(deviceAddress).close();
 
                                                 bleService.activeDevices.remove(deviceAddress);
 
+                                                connectedDevicesArrayAdapter.remove
+                                                        (DeviceInfoHelperFunctions.makeDeviceInfo(deviceName, deviceAddress));
+
                                             }
                                             */
 
                                             bleService.connect(deviceAddress);
+
+                                            //nfdService.expressDeviceLocationInterest(deviceAddress);
                                         }
                                     }
                                 }
@@ -1184,9 +1372,27 @@ public class MainActivity extends AppCompatActivity {
         }
 
         for (String device : devicesToRemove) {
+
             devicesInRangeLastNScansHashMap.remove(device);
 
             advertisingDevicesWithinRangeArrayAdapter.remove(device);
+
+            String deviceAddressWithColons = DeviceInfoHelperFunctions.getDeviceAddressFromDeviceInfo(device);
+            String deviceAddressNoColons =
+                    BluetoothHelperFunctions.removeColonsFromMACAddress(deviceAddressWithColons);
+
+            //Log.d(TAG, "UPDATEMISSEDSCANCOUNT: " + deviceAddressWithColons + ", " + deviceAddressNoColons);
+
+            String dataLocation = addressToLocation.get(deviceAddressNoColons);
+
+            if (beaconMACAuthentication) {
+                if (dataLocation != null) {
+                    addressToLocation.remove(deviceAddressNoColons);
+                    addressToLocationMappingsAdapter.remove(
+                            "Device location: " + "\n" + dataLocation + "\n" +
+                                    "Device address: " + "\n" + deviceAddressWithColons);
+                }
+            }
         }
 
         if (!listOfDevicesThatLeftRange.equals("")) {
@@ -1202,7 +1408,11 @@ public class MainActivity extends AppCompatActivity {
     void updateUI() {
 
         toggleScanButton.setText(
-                currentlyInScanCycle ? "Turn Scan Off" : "Turn Scan On"
+                currentlyInScanCycle ? "Scan Off" : "Scan On"
+        );
+
+        toggleAuthButton.setText(
+                beaconMACAuthentication ? "MAC Auth Off" : "MAC Auth On"
         );
 
         scanIntervalDisplay.setText(Long.toString(scanInterval));
@@ -1215,7 +1425,7 @@ public class MainActivity extends AppCompatActivity {
 
         minIntervalDisplay.setText(Long.toString(minInterval));
 
-
+        backoffThresholdDisplay.setText(Long.toString(backoffThreshold));
     }
 
     // function for requesting location services permission from the user
@@ -1337,5 +1547,29 @@ public class MainActivity extends AppCompatActivity {
 
     public static MainActivity getInstance() {
         return mainActivity;
+    }
+
+    Byte[] convertByteArrayToObjectByteArray (byte[] arr) {
+
+        Byte[] objectByteArray = new Byte[arr.length];
+
+        int i = 0;
+        for (byte b: arr) {
+            objectByteArray[i++] = new Byte(b);
+        }
+
+        return objectByteArray;
+    }
+
+    byte[] convertObjectByteArrayToByteArray (Byte[] arr) {
+
+        byte[] byteArray = new byte[arr.length];
+
+        int i = 0;
+        for (Byte b: arr) {
+            byteArray[i++] = b.byteValue();
+        }
+
+        return byteArray;
     }
 }

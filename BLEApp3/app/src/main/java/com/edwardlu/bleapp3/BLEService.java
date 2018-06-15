@@ -152,11 +152,12 @@ public class BLEService extends Service {
 
                 }
 
-                /*
+
                 for (int i = 0; i < currentReceivingPacketState.currentReceivingPacketLength; i++) {
-                    Log.d(TAG, "received array element " + i + ": " + Integer.toString(Byte.toUnsignedInt(currentReceivedByteArray[i])));
+                    Log.d(TAG, "received array element " + i + ": " + Integer.toString(Byte.toUnsignedInt(
+                            currentReceivingPacketState.currentReceivedByteArray[i])));
                 }
-                */
+
 
                 currentReceivingPacketState.copyOfLastReceivedByteArray = new byte[currentReceivingPacketState.currentReceivedByteArray.length];
 
@@ -482,7 +483,7 @@ public class BLEService extends Service {
 
             String deviceAddress = gatt.getDevice().getAddress();
 
-            Log.d(TAG, "there was a change in the BTLE module's characteristic");
+            Log.d(TAG, "there was a change in the BTLE module's characteristic: " + characteristic.getStringValue(0));
             broadcastUpdate(CHARACTERISTIC_CHANGE_DATA_AVAILABLE, gatt.getDevice().getAddress(), characteristic);
 
             boolean allTildes = true;
@@ -693,12 +694,12 @@ public class BLEService extends Service {
                     if (currentSendingPacketState.currentSendingByteArray != null) {
                         Log.d(TAG, "current byte array length: " + currentSendingPacketState.currentSendingByteArray.length);
 
-                    /*
+
                     Log.d(TAG, "current values in byte array: ");
-                    for (int i = 0; i < currentSendingByteArray.length; i++) {
-                        Log.d(TAG, Integer.toString(Byte.toUnsignedInt(currentSendingByteArray[i])));
+                    for (int i = 0; i < currentSendingPacketState.currentSendingByteArray.length; i++) {
+                        Log.d(TAG, Integer.toString(Byte.toUnsignedInt(currentSendingPacketState.currentSendingByteArray[i])));
                     }
-                    */
+
 
                         Log.d(TAG, deviceAddress+"---" + "Calling finishSendingByteArrayOverbLE from within on Characteristic Write.");
                         finishSendingByteArrayOverBLE(gatt.getDevice().getAddress());
@@ -985,12 +986,12 @@ public class BLEService extends Service {
             byte[] arrayToSend = Arrays.copyOfRange(currentSendingPacketState.currentSendingByteArray, 0, 20);
 
 
-            /*
+
             Log.d(TAG, "values in middle fragment: ");
             for (int i = 0; i < arrayToSend.length; i++ ){
                 Log.d(TAG, Integer.toString(Byte.toUnsignedInt(arrayToSend[i])));
             }
-            */
+
 
 
             send(arrayToSend, deviceAddress, hardcodedServiceUuid,
@@ -1016,11 +1017,11 @@ public class BLEService extends Service {
 
             Log.d(TAG, "values in end fragment: ");
 
-            /*
+
             for (int i = 0; i < arrayToSend.length; i++) {
                 Log.d(TAG, Integer.toString(Byte.toUnsignedInt(arrayToSend[i])));
             }
-            */
+
 
             send(arrayToSend, deviceAddress, hardcodedServiceUuid,
                     hardcodedWriteCharacteristicUuid);

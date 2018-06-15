@@ -84,7 +84,7 @@ void loop() {
   }
   else if (currentReadMode == 1) {
     if (firstTime1 == 1) {
-      printNCharacterMessage(blePacketSize, "we in mode 1");
+      printNCharacterMessage(blePacketSize, "mode 1");
 
       firstTime0 = 1;
       firstTime1 = 0;
@@ -111,7 +111,7 @@ void loop() {
 
     if (firstTime2 == 1) {
 
-      printNCharacterMessage(blePacketSize, "we in mode 2");
+      printNCharacterMessage(blePacketSize, "mode 2");
 
       incoming_packet_bytes = malloc(currentPacketLength);
 

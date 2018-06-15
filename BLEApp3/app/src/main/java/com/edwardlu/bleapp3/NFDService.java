@@ -67,10 +67,20 @@ public class NFDService extends Service {
     public final static String INTEREST_CHARACTERISTIC_ACTION_RECEIVED = "INTEREST_CHARACTERISTIC_ACTION_RECEIVED";
     public final static String INTEREST_DESCRIPTOR_ACTION_RECEIVED = "INTEREST_DESCRIPTOR_ACTION_RECEIVED";
     public final static String INTEREST_READ_FROM_DEVICE = "INTEREST_READ_FROM_DEVICE";
+    public final static String SEND_LOCATION_DATA = "SEND_LOCATION_DATA";
+    public final static String DEVICE_LOCATION_INTEREST_NACK = "DEVICE_LOCATION_INTEREST_NACK";
+    public final static String DEVICE_LOCATION_INTEREST_TIMEOUT = "DEVICE_LOCATION_INTEREST_TIMEOUT";
+    public final static String DEVICE_LOCATION_INTEREST_FAILEDVERIFY = "DEVICE_LOCATION_INTEREST_FAILEDVERIFY";
+    public final static String DEVICE_LOCATION_INTEREST_DATA = "DEVICE_LOCATION_INTEREST_DATA";
+    public final static String DEVICE_LOCATION_INTEREST_EXCEPTION = "DEVICE_LOCATION_INTEREST_EXCEPTION";
 
     // strings for intent extras
-    public final static String INTEREST_MAC = "INTEREST_CONNECT_MAC";
+    public final static String DEVICE_ADDRESS = "DEVICE_ADDRESS";
     public final static String DATA_PACKET_AS_BYTE_ARRAY = "DATA_PACKET_AS_BYTE_ARRAY";
+
+    // stores the last data packet we retrieved from a device; that way, interest to read from a device
+    // can be satisfied by this device's location data
+    HashMap<String, Byte[]> lastDataPacketForDevices;
 
     // variables related to writing and reading a key from a file
     /******************************************************************************/
@@ -97,10 +107,9 @@ public class NFDService extends Service {
     // sends string data to NFD face, using the name passed in for the data name
     public void sendDataToNFDFace(String data, String prefix) {
 
-        Calendar cal = Calendar.getInstance();
-        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
+        String timeStamp = new SimpleDateFormat("yyyy.MM.dd.HH.mm.ss").format(new Date());
 
-        String prefixWithTimestamp = prefix + "/" + sdf.format(cal.getTime());
+        String prefixWithTimestamp = prefix + "/" + timeStamp;
 
         Name dataName = new Name(prefixWithTimestamp);
 
@@ -140,7 +149,7 @@ public class NFDService extends Service {
     }
 
     // sends a data packet in byte array form directly to NFD face
-    public void sendDataPacketToNFDFace(byte[] dataPacketAsBytes) {
+    public void sendDataPacketAsBytesToNFDFace(byte[] dataPacketAsBytes) {
 
         Data dataPacket = interpretByteArrayAsData(dataPacketAsBytes);
 
@@ -161,29 +170,6 @@ public class NFDService extends Service {
         t.start();
     }
 
-    @Override
-    public void onDestroy() {
-        Log.d(TAG, "we got told to destroy ourselves");
-        super.onDestroy();
-        mFace.shutdown();
-        networkThread.interrupt();
-    }
-
-    private void registerDataPrefix () {
-        Log.d(TAG, "registering data prefix...");
-        try {
-            mFace.registerPrefix(new Name(getString(R.string.baseName) + "/discover"), OnInterestDiscover,
-                        OnPrefixRegisterFailed, OnPrefixRegisterSuccess);
-            mFace.registerPrefix(new Name(getString(R.string.baseName) + "/read"), OnInterestDeviceRead,
-                    OnPrefixRegisterFailed, OnPrefixRegisterSuccess);
-            mFace.registerPrefix(new Name(getString(R.string.baseName) + "/status"), OnInterestStatus,
-                    OnPrefixRegisterFailed, OnPrefixRegisterSuccess);
-
-        } catch (IOException | SecurityException e) {
-            e.printStackTrace();
-        }
-    }
-
     private final OnInterestCallback OnInterestDeviceRead = new OnInterestCallback() {
         @Override
         public void onInterest(Name prefix, Interest interest, Face face, long interestFilterId, InterestFilter filter) {
@@ -198,7 +184,7 @@ public class NFDService extends Service {
 
 
             Intent directlyReadFromDeviceIntent = new Intent(INTEREST_READ_FROM_DEVICE);
-            directlyReadFromDeviceIntent.putExtra(INTEREST_MAC, macAddressWithColons);
+            directlyReadFromDeviceIntent.putExtra(DEVICE_ADDRESS, macAddressWithColons);
             sendBroadcast(directlyReadFromDeviceIntent);
 
         }
@@ -265,6 +251,117 @@ public class NFDService extends Service {
             Log.d(TAG, "we failed to register the data prefix: " + prefix);
         }
     };
+
+    // expresses an interest for a device's location with a given MAC address
+    public void expressDeviceLocationInterest(String deviceAddress) {
+
+        Log.d(TAG, "express device location interest got called");
+
+        Interest interest = new Interest(new Name(getString(R.string.baseName) + "/read/" +
+                BluetoothHelperFunctions.removeColonsFromMACAddress(deviceAddress)));
+
+        interest.setInterestLifetimeMilliseconds(500);
+
+        class OneShotTask implements Runnable {
+            Interest interest;
+            OneShotTask(Interest i) { interest = i; }
+            public void run() {
+                try {
+                    mFace.expressInterest(interest, OnDeviceLocationData, OnDeviceLocationInterestTimeout, OnDeviceLocationInterestNack);
+                } catch (IOException e) {
+
+                    Intent deviceLocationInterestExceptionIntent = new Intent(DEVICE_LOCATION_INTEREST_EXCEPTION);
+
+                    deviceLocationInterestExceptionIntent.putExtra(DEVICE_ADDRESS, deviceAddress);
+
+                    sendBroadcast(deviceLocationInterestExceptionIntent);
+
+                    e.printStackTrace();
+                }
+            }
+        }
+        Thread t = new Thread(new OneShotTask(interest));
+        t.start();
+
+    }
+
+    private final OnData OnDeviceLocationData = new OnData() {
+        @Override
+        public void onData(Interest interest, Data data) {
+            String nameString = data.getName().toString();
+            String deviceAddress = BluetoothHelperFunctions.addColonsToMACAddress(nameString.substring(nameString.lastIndexOf("/") + 1));
+
+            Blob keyBlob = new Blob(hmacKey);
+
+            if(KeyChain.verifyDataWithHmacWithSha256(data, keyBlob)) {
+                Log.d("receivedPacketData", "successfully verified data with name: " + nameString);
+                Log.d(TAG, "received device location data for " + nameString);
+
+                Intent deviceLocationDataIntent = new Intent(DEVICE_LOCATION_INTEREST_DATA);
+
+                deviceLocationDataIntent.putExtra(DEVICE_ADDRESS, deviceAddress);
+                deviceLocationDataIntent.putExtra(DATA_PACKET_AS_BYTE_ARRAY, data.getDefaultWireEncoding().getImmutableArray());
+
+                sendBroadcast(deviceLocationDataIntent);
+
+            }
+            else {
+                Log.d("receivedPacketData", "failed to verify data with name: " + data.getName().toString() + ", ignoring it");
+
+                Intent deviceLocationFailedVerifyIntent = new Intent(DEVICE_LOCATION_INTEREST_FAILEDVERIFY);
+
+                deviceLocationFailedVerifyIntent.putExtra(DEVICE_ADDRESS, deviceAddress);
+
+                sendBroadcast(deviceLocationFailedVerifyIntent);
+            }
+
+        }
+    };
+
+    private final OnTimeout OnDeviceLocationInterestTimeout = new OnTimeout() {
+        @Override
+        public void onTimeout(Interest interest) {
+            String nameString = interest.getName().toString();
+            String deviceAddress = BluetoothHelperFunctions.addColonsToMACAddress(nameString.substring(nameString.lastIndexOf("/") + 1));
+
+            Intent deviceLocationInterestTimeoutIntent = new Intent(DEVICE_LOCATION_INTEREST_TIMEOUT);
+            deviceLocationInterestTimeoutIntent.putExtra(DEVICE_ADDRESS, deviceAddress);
+
+            sendBroadcast(deviceLocationInterestTimeoutIntent);
+
+            Log.d(TAG, "timed out waiting for " + nameString);
+        }
+    };
+
+    private final OnNetworkNack OnDeviceLocationInterestNack = new OnNetworkNack() {
+        @Override
+        public void onNetworkNack(Interest interest, NetworkNack networkNack) {
+            String nameString = interest.getName().toString();
+            String deviceAddress = BluetoothHelperFunctions.addColonsToMACAddress(nameString.substring(nameString.lastIndexOf("/") + 1));
+
+            Intent deviceLocationInterestNackIntent = new Intent(DEVICE_LOCATION_INTEREST_NACK);
+            deviceLocationInterestNackIntent.putExtra(DEVICE_ADDRESS, deviceAddress);
+
+            sendBroadcast(deviceLocationInterestNackIntent);
+
+            Log.d(TAG, "received NACK for " + nameString);
+        }
+    };
+
+    private void registerDataPrefix () {
+        Log.d(TAG, "registering data prefix...");
+        try {
+            mFace.registerPrefix(new Name(getString(R.string.baseName) + "/discover"), OnInterestDiscover,
+                    OnPrefixRegisterFailed, OnPrefixRegisterSuccess);
+            mFace.registerPrefix(new Name(getString(R.string.baseName) + "/read"), OnInterestDeviceRead,
+                    OnPrefixRegisterFailed, OnPrefixRegisterSuccess);
+            mFace.registerPrefix(new Name(getString(R.string.baseName) + "/status"), OnInterestStatus,
+                    OnPrefixRegisterFailed, OnPrefixRegisterSuccess);
+
+        } catch (IOException | SecurityException e) {
+            e.printStackTrace();
+        }
+    }
 
     private void initializeKeyChain() {
         Log.d(TAG, "initializing keychain");
@@ -338,6 +435,8 @@ public class NFDService extends Service {
             networkThread.start();
         }
 
+        lastDataPacketForDevices = new HashMap<>();
+
         return mBinder;
     }
 
@@ -362,6 +461,11 @@ public class NFDService extends Service {
         filter.addAction(INTEREST_CHARACTERISTIC_ACTION_RECEIVED);
         filter.addAction(INTEREST_DESCRIPTOR_ACTION_RECEIVED);
         filter.addAction(INTEREST_READ_FROM_DEVICE);
+        filter.addAction(DEVICE_LOCATION_INTEREST_NACK);
+        filter.addAction(DEVICE_LOCATION_INTEREST_TIMEOUT);
+        filter.addAction(DEVICE_LOCATION_INTEREST_FAILEDVERIFY);
+        filter.addAction(DEVICE_LOCATION_INTEREST_DATA);
+        filter.addAction(DEVICE_LOCATION_INTEREST_EXCEPTION);
         return filter;
     }
 
@@ -468,5 +572,13 @@ public class NFDService extends Service {
             Log.d(TAG, "Element " + i + " of key: " + Byte.toString(hmacKey[i]));
         }
 
+    }
+
+    @Override
+    public void onDestroy() {
+        Log.d(TAG, "we got told to destroy ourselves");
+        super.onDestroy();
+        mFace.shutdown();
+        networkThread.interrupt();
     }
 }

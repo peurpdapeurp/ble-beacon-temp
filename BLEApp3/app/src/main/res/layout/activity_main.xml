@@ -21,43 +21,6 @@
 
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:orientation="horizontal">
-
-            <LinearLayout
-                android:layout_width="311dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/textView17"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="IF NO DEVICES APPEAR ON SCAN, MAKE SURE:"
-                    android:textColor="@android:color/background_dark"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/textView18"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Bluetooth is enabled, location and storage permissions granted"
-                    android:textStyle="bold" />
-
-            </LinearLayout>
-
-            <Button
-                android:id="@+id/toggleScanButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Turn Scan Off" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
             android:layout_height="158dp"
             android:layout_marginBottom="8dp"
             android:layout_marginEnd="8dp"
@@ -76,10 +39,10 @@
                 android:orientation="vertical">
 
                 <TextView
-                    android:id="@+id/textView6"
+                    android:id="@+id/AdvertisingDevicesWithinRange"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:text="Advertising Devices In Range"
+                    android:text="Location Beacons In Range"
                     android:textAlignment="center"
                     android:textColor="@android:color/background_dark"
                     android:textSize="14sp"
@@ -96,7 +59,7 @@
             <LinearLayout
                 android:id="@+id/deviceList"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
                 android:layout_marginEnd="8dp"
                 android:layout_marginStart="8dp"
@@ -109,10 +72,10 @@
                 app:layout_constraintVertical_bias="0.511">
 
                 <TextView
-                    android:id="@+id/textView5"
+                    android:id="@+id/DevicesFromLastScan"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Devices From Last Scan"
+                    android:text="Location Beacons From Last Scan"
                     android:textAlignment="center"
                     android:textColor="@android:color/background_dark"
                     android:textSize="14sp"
@@ -124,50 +87,6 @@
                     android:layout_height="match_parent">
 
                 </ListView>
-
-            </LinearLayout>
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="41dp"
-            android:layout_marginBottom="8dp"
-            android:layout_marginEnd="8dp"
-            android:layout_marginStart="8dp"
-            android:layout_marginTop="8dp"
-            android:orientation="vertical"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintVertical_bias="0.468">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:id="@+id/deviceName"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:text="No Device Selected"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:id="@+id/deviceAddress"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:text="No Device Address"
-                        android:textSize="14sp" />
-
-                </LinearLayout>
 
             </LinearLayout>
 
@@ -189,7 +108,7 @@
                     android:orientation="horizontal">
 
                     <TextView
-                        android:id="@+id/textView4"
+                        android:id="@+id/ConnectedDevices"
                         android:layout_width="119dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
@@ -204,10 +123,10 @@
                 <ListView
                     android:id="@+id/connectedDevicesList"
                     android:layout_width="match_parent"
-                    android:layout_height="68dp" />
+                    android:layout_height="184dp" />
 
                 <TextView
-                    android:id="@+id/testView12"
+                    android:id="@+id/MACStoLocationMappings"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="MAC to Location Mappings"
@@ -225,39 +144,16 @@
                 android:layout_height="match_parent"
                 android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/textView7"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Current Scan Interval (ms)"
-                    android:textAlignment="center"
-                    android:textColor="@android:color/background_dark"
-                    android:textStyle="bold" />
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal">
 
-                    <TextView
-                        android:id="@+id/scanIntervalDisplay"
-                        android:layout_width="wrap_content"
-                        android:layout_height="match_parent"
-                        android:layout_weight="1"
-                        android:textAlignment="center" />
-
-                    <Button
-                        android:id="@+id/changeScanIntervalButton"
-                        android:layout_width="23dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Change" />
-
                 </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent"
+                    android:layout_height="363dp"
                     android:orientation="horizontal">
 
                     <LinearLayout
@@ -267,7 +163,30 @@
                         android:orientation="vertical">
 
                         <TextView
-                            android:id="@+id/textView8"
+                            android:id="@+id/CurrentScanInterval"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Current Scan Interval (ms)"
+                            android:textAlignment="center"
+                            android:textColor="@android:color/background_dark"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/scanIntervalDisplay"
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:layout_weight="1"
+                            android:textAlignment="center" />
+
+                        <Button
+                            android:id="@+id/changeScanIntervalButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="17dp"
+                            android:layout_weight="1"
+                            android:text="Change" />
+
+                        <TextView
+                            android:id="@+id/CurrentScanPeriod"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="Current Scan Period (ms)"
@@ -288,7 +207,7 @@
                             android:text="Change" />
 
                         <TextView
-                            android:id="@+id/textView10"
+                            android:id="@+id/MinScanInterval"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="Min Scan Interval (ms)"
@@ -314,7 +233,26 @@
                         android:orientation="vertical">
 
                         <TextView
-                            android:id="@+id/textView8"
+                            android:id="@+id/backoffThreshold"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Backoff Threshold (# of scans)"
+                            android:textColor="@android:color/background_dark"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/backoffThresholdDisplay"
+                            android:layout_width="match_parent"
+                            android:layout_height="37dp" />
+
+                        <Button
+                            android:id="@+id/changeBackoffThresholdButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Change" />
+
+                        <TextView
+                            android:id="@+id/MaxTolerableMissedScans"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="Max Tolerable Missed Scans"
@@ -335,7 +273,7 @@
                             android:text="Change" />
 
                         <TextView
-                            android:id="@+id/textView15"
+                            android:id="@+id/MaxScanInterval"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="Max Scan Interval (ms)"
@@ -352,7 +290,30 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text="Change" />
+
                     </LinearLayout>
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/toggleScanButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Scan Off" />
+
+                    <Button
+                        android:id="@+id/toggleAuthButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Auth Off" />
                 </LinearLayout>
 
             </LinearLayout>
